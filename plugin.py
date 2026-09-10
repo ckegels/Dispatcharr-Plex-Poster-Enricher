@@ -56,6 +56,9 @@ _running = {"active": False, "started": 0, "total": 0, "done": 0, "cancel": Fals
 _timer = None
 _timer_lock = threading.Lock()
 
+# Per-run cache of logo URLs that failed to download (avoids retrying dead URLs).
+_composite_failures = set()
+
 
 def _write_run_state(active, done=0, total=0, started=0):
     """Write run state to disk so all uWSGI workers can read it."""
@@ -234,6 +237,10 @@ def _make_composite_poster(logo_url, base_url, context=None):
     if os.path.exists(filepath):
         return f"{base_url}/media/poster_enricher/{filename}"
 
+    # Already failed this run? Don't retry the same dead URL hundreds of times.
+    if url_hash in _composite_failures:
+        return None
+
     try:
         # Download the logo. URL-encode spaces and special characters
         # (many picon URLs have spaces: "DOG TV.png", "FREE SPEECH TV.png").
@@ -301,6 +308,7 @@ def _make_composite_poster(logo_url, base_url, context=None):
         return f"{base_url}/media/poster_enricher/{filename}"
 
     except Exception as exc:
+        _composite_failures.add(url_hash)
         _file_log("warning", f"Composite failed for {logo_url}: {exc}")
         return None
 
@@ -589,6 +597,7 @@ def _enrich_worker(cfg, context):
     run_start = time.time()
     _file_log("info", "=" * 60)
     _file_log("info", "Enrichment run starting")
+    _composite_failures.clear()
     _file_log("info", f"Config: chain={cfg.get('chain', [])}, "
               f"overwrite={cfg.get('overwrite')}, "
               f"scope={cfg.get('scope_source_ids') or 'all'}")
