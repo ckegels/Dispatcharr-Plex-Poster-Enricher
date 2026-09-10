@@ -1,9 +1,9 @@
 {
   "name": "Poster Enricher",
-  "version": "0.2.0",
-  "description": "Enriches EPG programmes with poster artwork from TMDB, TVmaze, TVDB, Fanart.tv and OMDB, falling back to the channel logo so no guide card is ever blank. Works with whatever sources you enable — zero API keys still gives you TVmaze + channel-logo coverage.",
-  "author": "kegels",
-  "help_url": "https://github.com/Dispatcharr/Dispatcharr/blob/main/Plugins.md",
+  "version": "1.0.0",
+  "description": "Automatically adds poster artwork to every EPG programme so your media server's guide never shows blank cards.\n\nUses a 6-tier lookup chain: TMDB → TVmaze → TVDB → Fanart.tv → OMDB → channel logo composite. First match wins.\n\nWith zero API keys you still get TVmaze (free, no key needed) plus channel-logo composites — no card is ever blank. Adding a free TMDB key typically covers ~50% of programmes.\n\nChannel logos that fall back to the final tier are placed on a properly-sized dark poster canvas (not stretched). These composites can be served locally, through your Plex server, or uploaded to ImgBB's free CDN so they work on all clients including mobile and remote.\n\nThe plugin auto-runs after each EPG refresh and supports a configurable timer interval. All lookups are cached to minimise API calls.",
+  "author": "ckegels",
+  "help_url": "https://github.com/ckegels/Dispatcharr-Plex-Poster-Enricher",
   "fields": [],
   "_fields_note": "Settings are defined dynamically in plugin.py via the Plugin.fields attribute (single source of truth). This static array is intentionally empty so it can't drift.",
   "actions": [
@@ -26,7 +26,7 @@
     {
       "id": "view_stats",
       "label": "View Stats",
-      "description": "Shows per-source hit rates from the last run.",
+      "description": "Shows per-source hit rates, duration, and timestamp from the last run.",
       "button_label": "View Stats",
       "button_variant": "outline",
       "button_color": "blue"

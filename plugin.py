@@ -860,15 +860,15 @@ def _resolve_cfg(settings):
 
 class Plugin:
     name = "Poster Enricher"
-    version = "0.2.0"
+    version = "1.0.0"
     description = (
-        "Injects poster artwork into every EPG programme from TMDB, TVmaze, "
-        "TVDB, Fanart.tv and OMDB, with a channel-logo fallback so no guide "
-        "card is ever blank. Works with whatever you enable — zero keys still "
-        "gives TVmaze + channel logos."
+        "Automatically adds poster artwork to every EPG programme so your "
+        "media server's guide never shows blank cards. Uses a 6-tier lookup "
+        "chain (TMDB → TVmaze → TVDB → Fanart.tv → OMDB → channel logo "
+        "composite). Zero API keys still gives TVmaze + channel logos."
     )
-    author = "kegels"
-    help_url = "https://github.com/Dispatcharr/Dispatcharr/blob/main/Plugins.md"
+    author = "ckegels"
+    help_url = "https://github.com/ckegels/Dispatcharr-Plex-Poster-Enricher"
 
     fields = [
         {"id": "sec_keys", "label": "API Keys (all optional)", "type": "info",
