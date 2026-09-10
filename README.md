@@ -2,6 +2,8 @@
 
 Automatically adds poster artwork to every programme in your EPG, so your media server's guide never shows blank cards.
 
+I hated the way that Plex and jellyfin had missing posters and had blank spaces in the playing now sections, so this will search for posters and if none are available it will resize the logo and make a poster out of it.
+
 ## How It Works
 
 When Dispatcharr refreshes your EPG, programmes arrive with titles and times but often no artwork. This plugin runs through every programme and finds a poster image using a 6-tier lookup chain:
