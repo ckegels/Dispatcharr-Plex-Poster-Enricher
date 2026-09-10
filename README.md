@@ -1,3 +1,4 @@
+
 # Poster Enricher — Dispatcharr Plugin
 
 Automatically adds poster artwork to every programme in your EPG, so your media server's guide never shows blank cards.
@@ -33,11 +34,11 @@ The plugin writes the poster URL into each programme's data. Dispatcharr's XMLTV
 On the Dispatcharr server:
 ```bash
 # Required — composite poster generation
-cd /opt/dispatcharr && .venv/bin/pip install Pillow
+cd /opt/dispatcharr && .venv/bin/python3 -m pip install Pillow
 
 # Optional — SVG logo support
-apt install -y libcairo2-dev libffi-dev libgdk-pixbuf2.0-dev libpango1.0-dev
-cd /opt/dispatcharr && .venv/bin/pip install cairosvg
+apt install -y libcairo2-dev libffi-dev libgdk-pixbuf-xlib-2.0-dev libpango1.0-dev
+cd /opt/dispatcharr && .venv/bin/python3 -m pip install cairosvg
 ```
 
 ## Installation
@@ -181,9 +182,9 @@ Composite poster images are stored in `/opt/dispatcharr/media/poster_enricher/`.
 **"Unknown action" when clicking buttons** — Dispatcharr runs multiple worker processes. After importing a new plugin version, some workers still have old code. Fix: `systemctl restart dispatcharr`.
 
 **Composites not generating** — Check View Logs. Common causes:
-- Pillow not installed in Dispatcharr's venv (install with `.venv/bin/pip install Pillow`)
+- Pillow not installed in Dispatcharr's venv (install with `.venv/bin/python3 -m pip install Pillow`)
 - SVG logos failing (install cairosvg — see Requirements)
-- Logo URLs with spaces (fixed in v0.3+)
+- Logo URLs with spaces (fixed in v1.0+)
 
 **Stats stuck on old run** — Click View Stats again (may hit a different worker). After a restart, all workers share the same state file.
 
@@ -191,4 +192,4 @@ Composite poster images are stored in `/opt/dispatcharr/media/poster_enricher/`.
 
 **Composites don't show on mobile/remote** — TMDB/TVmaze posters work everywhere (public CDN). Composites are local by default. Set up ImgBB or Plex proxy (see Remote Access above).
 
-**SVG logos failing** — Install cairosvg: `apt install -y libcairo2-dev && .venv/bin/pip install cairosvg`. Without it, SVG logos fall back to the raw URL.
+**SVG logos failing** — Install cairosvg: `apt install -y libcairo2-dev libgdk-pixbuf-xlib-2.0-dev libpango1.0-dev && .venv/bin/python3 -m pip install cairosvg`. Without it, SVG logos fall back to the raw URL.
