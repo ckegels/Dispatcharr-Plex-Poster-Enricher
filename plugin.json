@@ -1,0 +1,56 @@
+{
+  "name": "Poster Enricher",
+  "version": "0.2.0",
+  "description": "Enriches EPG programmes with poster artwork from TMDB, TVmaze, TVDB, Fanart.tv and OMDB, falling back to the channel logo so no guide card is ever blank. Works with whatever sources you enable — zero API keys still gives you TVmaze + channel-logo coverage.",
+  "author": "kegels",
+  "help_url": "https://github.com/Dispatcharr/Dispatcharr/blob/main/Plugins.md",
+  "fields": [],
+  "_fields_note": "Settings are defined dynamically in plugin.py via the Plugin.fields attribute (single source of truth). This static array is intentionally empty so it can't drift.",
+  "actions": [
+    {
+      "id": "enrich_now",
+      "label": "Enrich EPG Now",
+      "description": "Queues a background job that walks every programme and injects poster artwork.",
+      "button_label": "Enrich Now",
+      "button_variant": "filled",
+      "button_color": "blue"
+    },
+    {
+      "id": "cancel_run",
+      "label": "Cancel Run",
+      "description": "Stops an in-progress enrichment between batches.",
+      "button_label": "Cancel",
+      "button_variant": "outline",
+      "button_color": "orange"
+    },
+    {
+      "id": "view_stats",
+      "label": "View Stats",
+      "description": "Shows per-source hit rates from the last run.",
+      "button_label": "View Stats",
+      "button_variant": "outline",
+      "button_color": "blue"
+    },
+    {
+      "id": "view_unmatched",
+      "label": "View Unmatched",
+      "description": "Lists programme titles that fell through to the channel-logo fallback.",
+      "button_label": "View Unmatched",
+      "button_variant": "outline",
+      "button_color": "orange"
+    },
+    {
+      "id": "clear_cache",
+      "label": "Clear Cache",
+      "description": "Wipes the local lookup cache so the next run re-queries every source.",
+      "button_label": "Clear Cache",
+      "button_variant": "outline",
+      "button_color": "red",
+      "confirm": {
+        "required": true,
+        "title": "Clear the lookup cache?",
+        "message": "The next enrichment run will re-query every source from scratch and will be slow. Continue?"
+      }
+    }
+  ]
+}
