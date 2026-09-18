@@ -29,6 +29,7 @@ import os
 import threading
 import time
 import traceback
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -60,6 +61,17 @@ _timer_lock = threading.Lock()
 _composite_failures = set()
 # Per-run cache of ImgBB upload failures (avoids retrying rejected images).
 _imgbb_failures = set()
+# Per-run ImgBB circuit breaker: once ImgBB starts rejecting everything (rate
+# limit / quota), stop hammering it for the rest of the run.
+_imgbb_state = {"consecutive_failures": 0, "disabled": False}
+_IMGBB_MAX_CONSECUTIVE_FAILURES = 5
+
+# Fonts tried (in order) for text-only fallback posters.
+_FONT_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+)
 
 
 def _write_run_state(active, done=0, total=0, started=0):
@@ -129,7 +141,10 @@ def _ws(message, extra=None):
 
 
 _MOVIE_WORDS = ("movie", "film", "cinema", "feature film")
-_SKIP_WORDS = ("news", "sport", "weather", "shopping", "infomercial", "teleshopping")
+_SKIP_WORDS = ("news", "sport", "weather", "shopping", "infomercial", "teleshopping",
+               # nl / fr / de — EU guides tag categories in their own language
+               "nieuws", "journaal", "weer", "actualit", "journal", "météo", "meteo",
+               "nachrichten", "wetter")
 
 
 def _categories(program):
@@ -172,44 +187,61 @@ _URL_ATTR_DEFAULT = ("url", "cache_url", "logo_url", "cached_url", "path", "src"
 _URL_ATTR_CACHE_FIRST = ("cache_url", "cached_url", "url", "logo_url", "path", "src")
 
 
-def _channel_logo_for(program, resolver_cache, candidates=_URL_ATTR_DEFAULT):
-    """Best-effort channel logo. Schema varies by Dispatcharr version, so this
-    tries several relations defensively and memoizes per EPGData id so we don't
-    re-query the same channel thousands of times.
+def _channel_fallback_for(program, resolver_cache, candidates=_URL_ATTR_DEFAULT,
+                          base_url=""):
+    """Best-effort channel artwork for the fallback tier. Schema varies by
+    Dispatcharr version, so this tries several relations defensively and
+    memoizes per EPGData id so we don't re-query the same channel thousands of
+    times.
 
-    Returns a URL string or None."""
+    Returns (logo_urls, channel_name). logo_urls is every distinct URL found,
+    in preference order, so a dead provider picon can fall through to
+    Dispatcharr's own cached copy. channel_name is used for a text-only poster
+    when no logo works at all."""
     try:
         epg = getattr(program, "epg", None)
         if epg is None:
-            return None
+            return [], None
         epg_id = getattr(epg, "id", None)
         if epg_id in resolver_cache:
             return resolver_cache[epg_id]
 
-        url = None
+        urls = []
+        name = getattr(epg, "name", None)
+
         # 1) EPGData.icon_url (present in most versions) — cheap, no join.
         icon = getattr(epg, "icon_url", None)
         if icon:
-            url = icon
+            urls.append(icon)
 
         # 2) A Channel linked to this EPGData. Instead of guessing field names,
         #    we discover the schema once (see _discover_channel_schema) and use
         #    whatever this Dispatcharr version actually calls things.
-        if not url:
-            schema = _channel_schema()
-            if schema and schema.get("Channel") and schema.get("epg_rel"):
-                try:
-                    Channel = schema["Channel"]
-                    ch = Channel.objects.filter(**{schema["epg_rel"]: epg}).first()
-                    if ch is not None:
-                        url = _extract_logo_url(ch, schema, candidates)
-                except Exception:
-                    pass
+        schema = _channel_schema()
+        if schema and schema.get("Channel") and schema.get("epg_rel"):
+            try:
+                Channel = schema["Channel"]
+                ch = Channel.objects.filter(**{schema["epg_rel"]: epg}).first()
+                if ch is not None:
+                    urls.extend(_extract_logo_urls(ch, schema, candidates))
+                    name = getattr(ch, "name", None) or name
+            except Exception:
+                pass
 
-        resolver_cache[epg_id] = url
-        return url
+        # Relative paths (e.g. cache_url "/api/channels/logos/12/cache/") need
+        # the Dispatcharr base URL to be fetchable.
+        out = []
+        for u in urls:
+            if u.startswith("/") and base_url:
+                u = base_url + u
+            if u.startswith("http") and u not in out:
+                out.append(u)
+
+        result = (out, (name or "").strip() or None)
+        resolver_cache[epg_id] = result
+        return result
     except Exception:
-        return None
+        return [], None
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +347,80 @@ def _make_composite_poster(logo_url, base_url, context=None):
         return None
 
 
+def _load_font(size):
+    from PIL import ImageFont
+    for path in _FONT_CANDIDATES:
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                pass
+    try:
+        return ImageFont.load_default(size=size)  # Pillow >= 10.1
+    except TypeError:
+        return ImageFont.load_default()
+
+
+def _wrap_lines(draw, text, font, max_w):
+    lines, line = [], ""
+    for word in text.split():
+        trial = f"{line} {word}".strip()
+        if draw.textlength(trial, font=font) <= max_w or not line:
+            line = trial
+        else:
+            lines.append(line)
+            line = word
+    if line:
+        lines.append(line)
+    return lines
+
+
+def _make_text_poster(text, base_url):
+    """Last-resort poster: *text* (usually the channel name) centred on the
+    same dark canvas as logo composites. Used when a channel has no logo or
+    every logo URL is dead, so the card is never blank.
+
+    Returns (url, url_hash); url is None on failure."""
+    url_hash = hashlib.md5(f"text:{text}".encode()).hexdigest()
+    filename = f"poster_{url_hash}.png"
+    filepath = os.path.join(_POSTER_DIR, filename)
+    if os.path.exists(filepath):
+        return f"{base_url}/media/poster_enricher/{filename}", url_hash
+    if url_hash in _composite_failures:
+        return None, url_hash
+    try:
+        from PIL import Image, ImageDraw
+
+        canvas = Image.new("RGB", (_POSTER_WIDTH, _POSTER_HEIGHT), _POSTER_BG)
+        draw = ImageDraw.Draw(canvas)
+        max_w = int(_POSTER_WIDTH * 0.80)
+        max_h = int(_POSTER_HEIGHT * _POSTER_LOGO_MAX_H)
+
+        # Largest font size whose wrapped text fits the logo area.
+        for size in range(96, 23, -6):
+            font = _load_font(size)
+            lines = _wrap_lines(draw, text, font, max_w)
+            line_h = int(size * 1.2)
+            if (len(lines) * line_h <= max_h
+                    and all(draw.textlength(l, font=font) <= max_w for l in lines)):
+                break
+
+        y = int(_POSTER_HEIGHT * 0.40) - (len(lines) * line_h) // 2
+        for l in lines:
+            w = draw.textlength(l, font=font)
+            draw.text(((_POSTER_WIDTH - w) / 2, y), l, font=font, fill=(235, 235, 235))
+            y += line_h
+
+        os.makedirs(_POSTER_DIR, exist_ok=True)
+        canvas.save(filepath, "PNG", optimize=True)
+        _file_log("info", f"Composite: created text poster {filename} for '{text}'")
+        return f"{base_url}/media/poster_enricher/{filename}", url_hash
+    except Exception as exc:
+        _composite_failures.add(url_hash)
+        _file_log("warning", f"Text poster failed for '{text}': {exc}")
+        return None, url_hash
+
+
 def _get_base_url():
     """Best-effort Dispatcharr base URL for serving composites."""
     try:
@@ -394,8 +500,8 @@ def _upload_to_imgbb(filepath, url_hash, api_key):
     if url_hash in _imgbb_url_cache:
         return _imgbb_url_cache[url_hash]
 
-    # Already failed this run? Don't retry.
-    if url_hash in _imgbb_failures:
+    # Already failed this run, or ImgBB has been rejecting everything? Don't retry.
+    if url_hash in _imgbb_failures or _imgbb_state["disabled"]:
         return None
 
     try:
@@ -426,20 +532,42 @@ def _upload_to_imgbb(filepath, url_hash, api_key):
 
         if result.get("success"):
             cdn_url = result["data"]["url"]
+            _imgbb_state["consecutive_failures"] = 0
             _imgbb_url_cache[url_hash] = cdn_url
             # Save cache every 50 uploads to avoid losing progress.
             if len(_imgbb_url_cache) % 50 == 0:
                 _save_imgbb_cache()
             return cdn_url
-        else:
-            _imgbb_failures.add(url_hash)
-            _file_log("warning", f"ImgBB upload failed for {url_hash}: {result}")
-            return None
-
-    except Exception as exc:
-        _imgbb_failures.add(url_hash)
-        _file_log("warning", f"ImgBB upload error for {url_hash}: {exc}")
+        _imgbb_failed(url_hash, str(result))
         return None
+
+    except urllib.error.HTTPError as exc:
+        # ImgBB puts the actual reason (rate limit, bad key, ...) in the body.
+        try:
+            body = exc.read().decode("utf-8", "replace")[:300]
+        except Exception:
+            body = ""
+        _imgbb_failed(url_hash, f"HTTP {exc.code}: {body or exc.reason}")
+        return None
+    except Exception as exc:
+        _imgbb_failed(url_hash, str(exc))
+        return None
+
+
+def _imgbb_failed(url_hash, reason):
+    """Record a failed upload; trip the circuit breaker if ImgBB keeps failing
+    or says we're rate limited. Nothing is cached permanently, so the next run
+    retries these images."""
+    _imgbb_failures.add(url_hash)
+    _imgbb_state["consecutive_failures"] += 1
+    _file_log("warning", f"ImgBB upload failed for {url_hash}: {reason}")
+    if ("rate limit" in reason.lower()
+            or _imgbb_state["consecutive_failures"] >= _IMGBB_MAX_CONSECUTIVE_FAILURES):
+        _imgbb_state["disabled"] = True
+        _file_log("warning",
+                  "ImgBB: pausing uploads for the rest of this run "
+                  f"({_imgbb_state['consecutive_failures']} consecutive failures). "
+                  "Affected programmes use the local URL and are retried next run.")
 
 
 # ---------------------------------------------------------------------------
@@ -547,23 +675,20 @@ def _do_discover_channel_schema(context):
     }
 
 
-def _extract_logo_url(channel, schema, candidates=_URL_ATTR_DEFAULT):
-    """Pull a URL string off a channel using the discovered logo field."""
+def _extract_logo_urls(channel, schema, candidates=_URL_ATTR_DEFAULT):
+    """Pull every URL string off a channel using the discovered logo field."""
     logo_field = schema.get("logo_field")
-    if not logo_field:
-        # No known logo field — try common URL attrs straight on the channel.
-        return _first_url_attr(channel, candidates)
-
-    val = getattr(channel, logo_field, None)
+    val = getattr(channel, logo_field, None) if logo_field else None
     if val is None:
-        return _first_url_attr(channel, candidates)
+        # No known logo field — try common URL attrs straight on the channel.
+        return _all_url_attrs(channel, candidates)
 
     # If it's already a string URL, use it.
     if isinstance(val, str):
-        return val or None
+        return [val] if val else []
 
-    # If it's a related object (e.g. a Logo model), read a URL attr off it.
-    got = _first_url_attr(val, candidates)
+    # If it's a related object (e.g. a Logo model), read URL attrs off it.
+    got = _all_url_attrs(val, candidates)
     if got:
         return got
 
@@ -571,34 +696,47 @@ def _extract_logo_url(channel, schema, candidates=_URL_ATTR_DEFAULT):
     try:
         s = str(val)
         if s and ("/" in s or s.startswith("http")):
-            return s
+            return [s]
     except Exception:
         pass
-    return None
+    return []
 
 
-def _first_url_attr(obj, candidates=_URL_ATTR_DEFAULT):
+def _all_url_attrs(obj, candidates=_URL_ATTR_DEFAULT):
+    found = []
     for attr in candidates:
         try:
             v = getattr(obj, attr, None)
         except Exception:
             v = None
         if isinstance(v, str) and v:
-            return v
+            found.append(v)
         # FieldFile-like: has a .url property that may raise if no file
-        if v is not None and not isinstance(v, str):
+        elif v is not None:
             try:
                 u = getattr(v, "url", None)
                 if isinstance(u, str) and u:
-                    return u
+                    found.append(u)
             except Exception:
                 pass
-    return None
+    return found
 
 
 # ---------------------------------------------------------------------------
 # Worker
 # ---------------------------------------------------------------------------
+
+def _needs_fallback_retry(props, imgbb_key):
+    """True if the programme's poster is one of our fallbacks that isn't in its
+    final form yet: a local composite still waiting for its ImgBB upload, or a
+    raw logo URL written because the composite couldn't be built."""
+    if props.get("poster_source") != "channel_logo":
+        return False
+    poster = props.get("poster") or ""
+    if imgbb_key:
+        return "i.ibb.co/" not in poster
+    return "/media/poster_enricher/" not in poster and "/photo/:/transcode" not in poster
+
 
 def _enrich_worker(cfg, context):
     import json
@@ -610,13 +748,15 @@ def _enrich_worker(cfg, context):
     _file_log("info", "Enrichment run starting")
     _composite_failures.clear()
     _imgbb_failures.clear()
+    _imgbb_state.update(consecutive_failures=0, disabled=False)
     _file_log("info", f"Config: chain={cfg.get('chain', [])}, "
               f"overwrite={cfg.get('overwrite')}, "
               f"scope={cfg.get('scope_source_ids') or 'all'}")
 
     cache = providers.LookupCache(_CACHE_PATH, ttl_days=int(cfg.get("cache_days", 14)))
     stats = {"existing": 0, "channel_logo": 0, "unmatched": 0, "transient": 0,
-             "composites_created": 0, "composites_failed": 0}
+             "composites_created": 0, "composites_failed": 0, "text_posters": 0,
+             "imgbb_pending": 0}
     unmatched = []
     logo_memo = {}
 
@@ -684,8 +824,12 @@ def _enrich_worker(cfg, context):
                 except Exception:
                     props = {}
 
-            # Tier 0: existing artwork
-            if not overwrite and (props.get("poster") or props.get("icon")):
+            # Tier 0: existing artwork. Our own fallback posters are only
+            # "existing" once they're in their final form — otherwise a run where
+            # ImgBB or a logo download failed would pin the programme to a LAN
+            # URL / dead picon forever (with Overwrite off).
+            if (not overwrite and (props.get("poster") or props.get("icon"))
+                    and not _needs_fallback_retry(props, imgbb_key)):
                 stats["existing"] += 1
                 continue
 
@@ -698,25 +842,42 @@ def _enrich_worker(cfg, context):
                 )
 
             if not url:
-                logo = _channel_logo_for(program, logo_memo, logo_candidates)
-                if logo:
-                    # Generate a composite poster (logo on dark canvas) so it
-                    # doesn't get stretched in the guide grid. Falls back to
-                    # the raw logo URL if Pillow isn't available or download fails.
+                logos, ch_name = _channel_fallback_for(
+                    program, logo_memo, logo_candidates, base_url)
+                # Composite the first logo that downloads (logo on dark canvas,
+                # so it isn't stretched in the guide grid).
+                composite, url_hash = None, None
+                for logo in logos:
                     composite = _make_composite_poster(logo, base_url, context)
                     if composite:
-                        # Priority: ImgBB CDN > Plex proxy > direct URL.
                         url_hash = hashlib.md5(logo.encode()).hexdigest()
-                        filepath = os.path.join(_POSTER_DIR, f"poster_{url_hash}.png")
-                        if imgbb_key:
-                            cdn_url = _upload_to_imgbb(filepath, url_hash, imgbb_key)
-                            url = cdn_url or composite
-                        else:
-                            url = _wrap_plex_proxy(composite, plex_url, plex_token)
                         stats["composites_created"] += 1
+                        break
+                if not composite and logos:
+                    stats["composites_failed"] += 1
+                # No usable logo: text poster with the channel name (or title).
+                if not composite:
+                    label = ch_name or program.title
+                    if label:
+                        composite, url_hash = _make_text_poster(label, base_url)
+                        if composite:
+                            stats["text_posters"] += 1
+
+                if composite:
+                    # Priority: ImgBB CDN > Plex proxy > direct URL.
+                    if imgbb_key:
+                        filepath = os.path.join(_POSTER_DIR, f"poster_{url_hash}.png")
+                        cdn_url = _upload_to_imgbb(filepath, url_hash, imgbb_key)
+                        if not cdn_url:
+                            stats["imgbb_pending"] += 1
+                        url = cdn_url or composite
                     else:
-                        url = logo
-                        stats["composites_failed"] += 1
+                        url = _wrap_plex_proxy(composite, plex_url, plex_token)
+                    source = "channel_logo"
+                    stats["channel_logo"] += 1
+                elif logos:
+                    # Pillow missing etc. — raw logo beats a blank card.
+                    url = logos[0]
                     source = "channel_logo"
                     stats["channel_logo"] += 1
                 else:
@@ -881,7 +1042,7 @@ def _resolve_cfg(settings):
 
 class Plugin:
     name = "Poster Enricher"
-    version = "1.0.0"
+    version = "1.1.0"
     description = (
         "Automatically adds poster artwork to every EPG programme so your "
         "media server's guide never shows blank cards. Uses a 6-tier lookup "
@@ -1158,6 +1319,10 @@ class Plugin:
         composites_fail = stats.get("composites_failed", 0)
         if composites_ok or composites_fail:
             parts.append(f"composites: {composites_ok} ok / {composites_fail} failed")
+        if stats.get("text_posters", 0):
+            parts.append(f"text posters: {stats['text_posters']}")
+        if stats.get("imgbb_pending", 0):
+            parts.append(f"awaiting ImgBB upload: {stats['imgbb_pending']} (retried next run)")
         return {"status": "ok", "message": header + " — " + " | ".join(parts)}
 
     def _view_unmatched(self):

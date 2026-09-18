@@ -1,6 +1,6 @@
 {
   "name": "Poster Enricher",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Automatically adds poster artwork to every EPG programme so your media server's guide never shows blank cards.\n\nUses a 6-tier lookup chain: TMDB → TVmaze → TVDB → Fanart.tv → OMDB → channel logo composite. First match wins.\n\nWith zero API keys you still get TVmaze (free, no key needed) plus channel-logo composites — no card is ever blank. Adding a free TMDB key typically covers ~50% of programmes.\n\nChannel logos that fall back to the final tier are placed on a properly-sized dark poster canvas (not stretched). These composites can be served locally, through your Plex server, or uploaded to ImgBB's free CDN so they work on all clients including mobile and remote.\n\nThe plugin auto-runs after each EPG refresh and supports a configurable timer interval. All lookups are cached to minimise API calls.",
   "author": "ckegels",
   "help_url": "https://github.com/ckegels/Dispatcharr-Plex-Poster-Enricher",

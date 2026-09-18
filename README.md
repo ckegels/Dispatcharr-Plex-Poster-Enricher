@@ -12,7 +12,8 @@ When Dispatcharr refreshes your EPG, programmes arrive with titles and times but
 4. **TVDB** — TheTVDB (additional TV coverage)
 5. **Fanart.tv** — high-quality fan artwork
 6. **OMDB** — Open Movie Database (last API resort)
-7. **Channel logo composite** — if no API finds a match, the channel's logo is placed on a dark poster-sized canvas so it looks clean in the guide instead of stretched
+7. **Channel logo composite** — if no API finds a match, the channel's logo is placed on a dark poster-sized canvas so it looks clean in the guide instead of stretched. Every logo URL the channel has is tried (provider picon first, then Dispatcharr's cached copy), so a dead picon doesn't leave the card blank
+8. **Text poster** — if the channel has no working logo at all, the channel name is rendered onto the same dark canvas
 
 The plugin writes the poster URL into each programme's data. Dispatcharr's XMLTV output then includes it as an `<icon>` tag, and your media server (Plex, Jellyfin, Emby) displays it in the guide.
 
@@ -115,6 +116,8 @@ To make composites work on **mobile apps and remote clients**, use ONE of these 
 Leave all remote access fields blank. Composites work on your local network. TMDB/TVmaze posters still work everywhere.
 
 **Priority:** ImgBB (if key set) → Plex proxy (if URL set) → Direct local URL.
+
+If ImgBB rejects uploads (rate limit / quota), the plugin pauses uploads after 5 consecutive failures for the rest of that run and logs ImgBB's reason. Affected programmes temporarily use the local URL and are retried automatically on the next run — even with Overwrite off.
 
 ### Auto-Run
 
