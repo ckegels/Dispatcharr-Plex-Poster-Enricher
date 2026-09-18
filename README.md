@@ -41,14 +41,35 @@ cd /opt/dispatcharr && .venv/bin/python3 -m pip install cairosvg
 
 ## Installation
 
-1. Download `poster_enricher.zip`
-2. In Dispatcharr, go to **Plugins** → **Import** → select the ZIP file
+### Option A: Add as a plugin repository (recommended — one-click updates)
+
+1. In Dispatcharr, go to **Plugins** → **Repositories** → **Add Repository**
+2. Paste this manifest URL:
+   ```
+   https://raw.githubusercontent.com/ckegels/Dispatcharr-Plex-Poster-Enricher/main/manifest.json
+   ```
+3. Find **Poster Enricher** in the available plugins and click **Install** (or **Overwrite** if you already imported it manually — your settings and API keys are kept)
+4. Enable the plugin, configure settings, then restart Dispatcharr so all workers load it: `systemctl restart dispatcharr`
+
+New versions then show up as **Update available** in Dispatcharr.
+
+### Option B: Manual import
+
+1. Download `poster_enricher-vX.Y.Z.zip` from the [latest release](https://github.com/ckegels/Dispatcharr-Plex-Poster-Enricher/releases/latest) — **not** GitHub's "Source code (zip)", which has a different folder name and installs as a separate plugin with empty settings
+2. In Dispatcharr, go to **Plugins** → **Import** → select the ZIP file. When updating, confirm **Replace** — settings are kept
 3. Enable the plugin (a trust warning modal appears the first time)
 4. Configure settings (see below)
-5. Click **Enrich Now** to run the first enrichment
-6. Restart Dispatcharr so all workers load the plugin: `systemctl restart dispatcharr`
+5. Restart Dispatcharr so all workers load the plugin: `systemctl restart dispatcharr`
+6. Click **Enrich Now** to run the first enrichment
 
-Or manually: drop the three files (`plugin.json`, `plugin.py`, `providers.py`) into `data/plugins/poster_enricher/` and click Refresh on the Plugins page.
+Or manually: drop `plugin.json`, `plugin.py` and `providers.py` into `data/plugins/poster_enricher/` and click Refresh on the Plugins page.
+
+### Publishing a release (maintainers)
+
+1. Bump `version` in both `plugin.json` and `plugin.py`
+2. Run `python3 scripts/build_release.py` — builds `dist/poster_enricher-vX.Y.Z.zip` and regenerates `manifest.json` + `metadata/poster_enricher/manifest.json` with its SHA256
+3. Commit and push the manifests, then create the release with exactly that zip:
+   `gh release create vX.Y.Z dist/poster_enricher-vX.Y.Z.zip --title vX.Y.Z --generate-notes`
 
 ## Settings
 

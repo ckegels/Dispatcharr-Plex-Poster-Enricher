@@ -1,0 +1,36 @@
+{
+  "generated_at": "2026-09-18T12:54:51+00:00",
+  "manifest": {
+    "slug": "poster_enricher",
+    "name": "Poster Enricher",
+    "description": "Automatically adds poster artwork to every EPG programme so your media server's guide never shows blank cards.",
+    "author": "ckegels",
+    "maintainers": [
+      "ckegels"
+    ],
+    "license": "Apache-2.0",
+    "repo_url": "https://github.com/ckegels/Dispatcharr-Plex-Poster-Enricher",
+    "registry_name": "ckegels/Dispatcharr-Plex-Poster-Enricher",
+    "last_updated": "2026-09-18T12:54:51+00:00",
+    "latest": {
+      "version": "1.1.0",
+      "last_updated": "2026-09-18T12:54:51+00:00",
+      "checksum_md5": "8afb5701e68ace6827f4e352f59cd884",
+      "checksum_sha256": "c0a83429f9f89d1512c00a7665d40ca2e5842f028d5f7cd5b0094fd91cdbc9b1",
+      "url": "https://github.com/ckegels/Dispatcharr-Plex-Poster-Enricher/releases/download/v1.1.0/poster_enricher-v1.1.0.zip",
+      "latest_url": "https://github.com/ckegels/Dispatcharr-Plex-Poster-Enricher/releases/download/v1.1.0/poster_enricher-v1.1.0.zip",
+      "size": 32
+    },
+    "versions": [
+      {
+        "version": "1.1.0",
+        "last_updated": "2026-09-18T12:54:51+00:00",
+        "checksum_md5": "8afb5701e68ace6827f4e352f59cd884",
+        "checksum_sha256": "c0a83429f9f89d1512c00a7665d40ca2e5842f028d5f7cd5b0094fd91cdbc9b1",
+        "url": "https://github.com/ckegels/Dispatcharr-Plex-Poster-Enricher/releases/download/v1.1.0/poster_enricher-v1.1.0.zip",
+        "latest_url": "https://github.com/ckegels/Dispatcharr-Plex-Poster-Enricher/releases/download/v1.1.0/poster_enricher-v1.1.0.zip",
+        "size": 32
+      }
+    ]
+  }
+}
