@@ -1,11 +1,6 @@
-
 # Poster Enricher — Dispatcharr Plugin
 
 Automatically adds poster artwork to every programme in your EPG, so your media server's guide never shows blank cards.
-
-I hated the way that Plex and jellyfin had missing posters and had blank spaces in the playing now sections, so this will search for posters and if none are available it will resize the logo and make a poster out of it.
-
-This Plugin Was built with AI assistance.
 
 ## How It Works
 

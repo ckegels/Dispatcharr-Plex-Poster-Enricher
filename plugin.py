@@ -58,6 +58,8 @@ _timer_lock = threading.Lock()
 
 # Per-run cache of logo URLs that failed to download (avoids retrying dead URLs).
 _composite_failures = set()
+# Per-run cache of ImgBB upload failures (avoids retrying rejected images).
+_imgbb_failures = set()
 
 
 def _write_run_state(active, done=0, total=0, started=0):
@@ -392,12 +394,19 @@ def _upload_to_imgbb(filepath, url_hash, api_key):
     if url_hash in _imgbb_url_cache:
         return _imgbb_url_cache[url_hash]
 
+    # Already failed this run? Don't retry.
+    if url_hash in _imgbb_failures:
+        return None
+
     try:
         import base64
         import json
 
         with open(filepath, "rb") as f:
             img_data = base64.b64encode(f.read()).decode("utf-8")
+
+        # Small delay between uploads to avoid rate limiting.
+        time.sleep(0.5)
 
         # ImgBB API: POST with base64 image data.
         post_data = urllib.parse.urlencode({
@@ -423,10 +432,12 @@ def _upload_to_imgbb(filepath, url_hash, api_key):
                 _save_imgbb_cache()
             return cdn_url
         else:
+            _imgbb_failures.add(url_hash)
             _file_log("warning", f"ImgBB upload failed for {url_hash}: {result}")
             return None
 
     except Exception as exc:
+        _imgbb_failures.add(url_hash)
         _file_log("warning", f"ImgBB upload error for {url_hash}: {exc}")
         return None
 
@@ -598,6 +609,7 @@ def _enrich_worker(cfg, context):
     _file_log("info", "=" * 60)
     _file_log("info", "Enrichment run starting")
     _composite_failures.clear()
+    _imgbb_failures.clear()
     _file_log("info", f"Config: chain={cfg.get('chain', [])}, "
               f"overwrite={cfg.get('overwrite')}, "
               f"scope={cfg.get('scope_source_ids') or 'all'}")
